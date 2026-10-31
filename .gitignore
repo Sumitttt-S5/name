@@ -1,0 +1,32 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+coverage/
+
+# Secrets
+.env
+.env.*
+!.env.example
+
+# Temporary scan data
+tmp/
+temp/
+uploads/
+extracted/
+*.whl
+*.tar.gz
+*.tgz
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
