@@ -1,0 +1,150 @@
+{
+  "schema_version": "1.0.0",
+  "scan_id": "955d9e25-cd88-4c93-8a6b-d9a61206675a",
+  "package": {
+    "name": "examples",
+    "version": null,
+    "ecosystem": "pypi",
+    "artifact_hash": null,
+    "artifact_filename": null
+  },
+  "scan_status": "COMPLETED",
+  "risk": {
+    "score": 18,
+    "severity": "LOW",
+    "confidence": "LOW",
+    "explanation": "Preliminary static-analysis indicator score. It is not a calibrated malware probability. A low score does not establish that a package is safe."
+  },
+  "coverage": {
+    "files_discovered": 2,
+    "files_analyzed": 2,
+    "files_skipped": 0,
+    "limitations": [
+      "Only Python source files are analyzed.",
+      "Taint analysis is sequential and intraprocedural.",
+      "Complex control-flow propagation is not implemented.",
+      "Cross-function taint propagation is not implemented.",
+      "Package metadata and README claims are not analyzed yet.",
+      "Previous-version comparison is not implemented yet.",
+      "No dynamic sandbox execution has been performed."
+    ]
+  },
+  "stages": {
+    "stage_1_name_and_lie_detector": {
+      "status": "NOT_AVAILABLE",
+      "score": null,
+      "summary": "Package identity and README comparison are pending."
+    },
+    "stage_2_password_and_gibberish_tracker": {
+      "status": "PARTIAL",
+      "score": 18,
+      "summary": "AST behaviour indicators and basic source-to-sink taint analysis performed."
+    },
+    "stage_3_update_hijack_detector": {
+      "status": "NOT_AVAILABLE",
+      "score": null,
+      "summary": "Previous package version was not supplied."
+    },
+    "stage_4_fake_bait_sandbox": {
+      "status": "NOT_AVAILABLE",
+      "score": null,
+      "summary": "Isolated sandbox is not implemented yet."
+    },
+    "stage_5_false_alarm_filter": {
+      "status": "NOT_AVAILABLE",
+      "score": null,
+      "summary": "Evidence correlation is not implemented yet."
+    },
+    "stage_6_ai_reporter": {
+      "status": "NOT_AVAILABLE",
+      "score": null,
+      "summary": "AI-assisted reporting is not implemented yet."
+    }
+  },
+  "findings": [
+    {
+      "finding_id": "555ad3a2f638",
+      "stage": 2,
+      "rule_id": "PY-SECRET-SOURCE-001",
+      "title": "Environment variable access",
+      "description": "The package reads an environment variable.",
+      "severity": "LOW",
+      "confidence": "LOW",
+      "file": "sample_suspicious.py",
+      "line": 8,
+      "evidence": [
+        "os.getenv detected"
+      ],
+      "mitre_techniques": [],
+      "score_contribution": 1
+    },
+    {
+      "finding_id": "05030af01bec",
+      "stage": 2,
+      "rule_id": "PY-OBFUSCATION-001",
+      "title": "Encoded data decoding",
+      "description": "The package decodes encoded content.",
+      "severity": "LOW",
+      "confidence": "LOW",
+      "file": "sample_suspicious.py",
+      "line": 10,
+      "evidence": [
+        "base64.b64decode detected"
+      ],
+      "mitre_techniques": [],
+      "score_contribution": 1
+    },
+    {
+      "finding_id": "5f25c281872b",
+      "stage": 2,
+      "rule_id": "PY-PROCESS-002",
+      "title": "Subprocess execution",
+      "description": "The package starts an external process.",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "file": "sample_suspicious.py",
+      "line": 12,
+      "evidence": [
+        "subprocess.run detected; shell=True: True"
+      ],
+      "mitre_techniques": [],
+      "score_contribution": 5
+    },
+    {
+      "finding_id": "89d1d73e14ab",
+      "stage": 2,
+      "rule_id": "PY-NETWORK-001",
+      "title": "Network communication",
+      "description": "The package performs a network operation.",
+      "severity": "MEDIUM",
+      "confidence": "LOW",
+      "file": "sample_suspicious.py",
+      "line": 14,
+      "evidence": [
+        "requests.post detected"
+      ],
+      "mitre_techniques": [],
+      "score_contribution": 1
+    },
+    {
+      "finding_id": "PY-TAINT-001",
+      "stage": 2,
+      "rule_id": "PY-TAINT-EXFIL-001",
+      "title": "Sensitive data reaches a potentially dangerous sink",
+      "description": "Data originating from a sensitive source reaches requests.post. This may indicate credential exposure, data exfiltration, or unsafe process argument handling.",
+      "severity": "HIGH",
+      "confidence": "MEDIUM",
+      "file": "sample_suspicious.py",
+      "line": 14,
+      "evidence": [
+        "Sensitive source detected at line 8",
+        "Sink: requests.post()",
+        "Tainted argument: data",
+        "Sink call line: 14"
+      ],
+      "mitre_techniques": [],
+      "score_contribution": 10
+    }
+  ],
+  "parse_issues": []
+}
