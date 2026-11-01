@@ -2053,8 +2053,8 @@ function App() {
           </div>
 
           <div className="brand-text">
-            <h2>SUPPLY CHAIN</h2>
-            <span>GUARDIAN</span>
+            <h1>KodKavach</h1>
+            <span></span>
           </div>
 
           <button
@@ -2337,7 +2337,7 @@ function App() {
                           >
                             {completedStages.includes(stage.key)
                               ? "Ready"
-                              : "Planned"}
+                              : "Set to Go"}
                           </span>
                         </div>
                       ))}
