@@ -2134,7 +2134,7 @@ function App() {
           </div>
 
           <div className="sidebar-version">
-            <span>SUPPLY CHAIN GUARDIAN</span>
+            <span>KodKavach</span>
             <span>Version 0.5.0</span>
           </div>
         </div>
@@ -2788,7 +2788,7 @@ function App() {
         <footer className="app-footer">
           <div>
             <Shield size={15} />
-            <span>Supply Chain Guardian</span>
+            <span>KodKavach</span>
           </div>
           <span>
             Software Supply Chain Security Platform · v0.5.0
