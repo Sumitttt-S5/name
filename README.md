@@ -2,7 +2,7 @@
 
 ### AI-Assisted Python Package Security & Supply Chain Threat Detection Platform
 
-**Supply Chain Guardian (SCG)** is a security analysis platform designed to identify suspicious Python packages and potentially malicious behaviour in the PyPI software supply chain.
+**KODKAVACH** is a security analysis platform designed to identify suspicious Python packages and potentially malicious behaviour in the PyPI software supply chain.
 
 Traditional vulnerability scanners primarily identify known vulnerabilities. SCG takes a multi-layered approach by examining package identity, source code, version changes and runtime behaviour to help developers make more informed decisions before trusting a package.
 
