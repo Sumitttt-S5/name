@@ -1,17 +1,27 @@
 
 import ast
-from typing import Dict, Set, List
+from collections import defaultdict
+from typing import DefaultDict, Set, List
 
 from scanner.models import ScanFinding
 
 
-# Sensitive sources: places where credentials or secrets may originate.
+# ---------------------------------------------------------
+# 1. TAINT SOURCES
+# ---------------------------------------------------------
+
+# Sources of credentials and sensitive information.
 SENSITIVE_SOURCES = {
     "os.getenv",
     "os.environ.get",
 }
 
-# Network sinks: functions that may transmit sensitive data.
+# Sources of untrusted user-controlled input.
+UNTRUSTED_SOURCES = {
+    "input",
+}
+
+# Network sinks.
 NETWORK_SINKS = {
     "requests.post",
     "requests.put",
@@ -31,7 +41,7 @@ PROCESS_SINKS = {
     "os.system",
 }
 
-# Functions that preserve taint while transforming data.
+# Calls that preserve taint.
 TAINT_PRESERVING_CALLS = {
     "base64.b64encode",
     "base64.b64decode",
@@ -43,6 +53,10 @@ TAINT_PRESERVING_CALLS = {
     "bytes",
 }
 
+
+# ---------------------------------------------------------
+# 2. AST HELPERS
+# ---------------------------------------------------------
 
 def get_call_name(node):
     """Convert a function call expression into a dotted name."""
@@ -60,52 +74,71 @@ def get_call_name(node):
     return ""
 
 
+# ---------------------------------------------------------
+# 3. TAINT VISITOR
+# ---------------------------------------------------------
+
 class TaintVisitor(ast.NodeVisitor):
     """
-    Basic intraprocedural taint analysis.
+    Intraprocedural taint analysis.
 
-    Tracks sensitive values from sources such as os.getenv()
-    to network and process-execution sinks.
+    Tracks:
+        - Sensitive data from environment variables.
+        - Untrusted data from input().
+        - Propagation through assignments and expressions.
+        - Sensitive and untrusted data reaching dangerous sinks.
 
-    This is static analysis: package code is never executed.
+    Package code is never executed.
     """
 
     def __init__(self, file_path: str):
         self.file_path = str(file_path)
 
-        # Variable name -> set of source line numbers.
-        self.environment: Dict[str, Set[int]] = {}
+        # Variable name -> source line numbers.
+        self.environment: dict[str, Set[int]] = {}
+
+        # Source line -> source categories.
+        self.source_kinds: DefaultDict[int, Set[str]] = defaultdict(set)
 
         self.findings: List[ScanFinding] = []
         self.finding_counter = 0
 
+    # -----------------------------------------------------
+    # SOURCE TRACKING
+    # -----------------------------------------------------
+
     def expression_origins(self, node) -> Set[int]:
-        """
-        Return source line numbers that may have influenced an expression.
-        """
+        """Return source lines that may have influenced an expression."""
 
         if node is None:
             return set()
 
-        # Variable reference.
         if isinstance(node, ast.Name):
             return set(self.environment.get(node.id, set()))
 
-        # Sensitive source, such as os.getenv("API_TOKEN").
         if isinstance(node, ast.Call):
             name = get_call_name(node.func)
 
             if name in SENSITIVE_SOURCES:
+                self.source_kinds[node.lineno].add("SENSITIVE_DATA")
                 return {node.lineno}
 
-            # Preserve taint through known conversion/encoding functions.
-            if name in TAINT_PRESERVING_CALLS:
-                if node.args:
-                    return self.expression_origins(node.args[0])
-                return set()
+            if name in UNTRUSTED_SOURCES:
+                self.source_kinds[node.lineno].add("UNTRUSTED_INPUT")
+                return {node.lineno}
 
-            # Preserve taint through string/bytes methods:
-            # token.encode(), payload.decode().
+            if name in TAINT_PRESERVING_CALLS:
+                origins = set()
+
+                for argument in node.args:
+                    origins |= self.expression_origins(argument)
+
+                for keyword in node.keywords:
+                    origins |= self.expression_origins(keyword.value)
+
+                return origins
+
+            # Preserve taint through encode/decode methods.
             if (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr in {"encode", "decode"}
@@ -114,46 +147,46 @@ class TaintVisitor(ast.NodeVisitor):
 
             return set()
 
-        # String concatenation and other binary operations.
         if isinstance(node, ast.BinOp):
             return (
                 self.expression_origins(node.left)
                 | self.expression_origins(node.right)
             )
 
-        # Formatted strings.
         if isinstance(node, ast.JoinedStr):
             origins = set()
+
             for value in node.values:
                 origins |= self.expression_origins(value)
+
             return origins
 
         if isinstance(node, ast.FormattedValue):
             return self.expression_origins(node.value)
 
-        # Lists, tuples and sets.
         if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
             origins = set()
+
             for element in node.elts:
                 origins |= self.expression_origins(element)
+
             return origins
 
-        # Dictionaries.
         if isinstance(node, ast.Dict):
             origins = set()
+
             for key, value in zip(node.keys, node.values):
                 origins |= self.expression_origins(key)
                 origins |= self.expression_origins(value)
+
             return origins
 
-        # Subscript access, e.g. payload["token"].
         if isinstance(node, ast.Subscript):
             return (
                 self.expression_origins(node.value)
                 | self.expression_origins(node.slice)
             )
 
-        # Conditional expression.
         if isinstance(node, ast.IfExp):
             return (
                 self.expression_origins(node.test)
@@ -161,22 +194,35 @@ class TaintVisitor(ast.NodeVisitor):
                 | self.expression_origins(node.orelse)
             )
 
-        # Unary operations.
         if isinstance(node, ast.UnaryOp):
             return self.expression_origins(node.operand)
 
-        # Comparisons.
         if isinstance(node, ast.Compare):
             origins = self.expression_origins(node.left)
+
             for comparator in node.comparators:
                 origins |= self.expression_origins(comparator)
+
             return origins
 
-        # Named expressions, e.g. (payload := token).
         if isinstance(node, ast.NamedExpr):
             return self.expression_origins(node.value)
 
         return set()
+
+    def get_source_kinds(self, origins: Set[int]) -> Set[str]:
+        """Determine which source categories contributed to an expression."""
+
+        kinds = set()
+
+        for line in origins:
+            kinds.update(self.source_kinds.get(line, set()))
+
+        return kinds
+
+    # -----------------------------------------------------
+    # VARIABLE ASSIGNMENT
+    # -----------------------------------------------------
 
     def assign_target(self, target, origins: Set[int]):
         """Assign taint information to variables and simple containers."""
@@ -189,12 +235,18 @@ class TaintVisitor(ast.NodeVisitor):
                 self.assign_target(element, origins)
 
         elif isinstance(target, ast.Subscript):
-            existing = self.expression_origins(target.value)
-            self.environment.update({})
-            # Container mutation is not fully modelled.
-            # Preserve the expression's existing origins where possible.
             if isinstance(target.value, ast.Name):
-                self.environment[target.value.id] = existing | set(origins)
+                name = target.value.id
+
+                existing = self.environment.get(name, set())
+
+                self.environment[name] = (
+                    set(existing) | set(origins)
+                )
+
+    # -----------------------------------------------------
+    # FINDING GENERATION
+    # -----------------------------------------------------
 
     def add_flow_finding(
         self,
@@ -203,42 +255,100 @@ class TaintVisitor(ast.NodeVisitor):
         origins: Set[int],
         argument_name: str,
     ):
-        """Create a finding when tainted data reaches a sensitive sink."""
+        """Create a finding when tainted data reaches a dangerous sink."""
 
         if not origins:
+            return
+
+        source_kinds = self.get_source_kinds(origins)
+
+        if not source_kinds:
             return
 
         self.finding_counter += 1
 
         source_lines = sorted(origins)
 
-        finding = ScanFinding(
-            finding_id=f"PY-TAINT-{self.finding_counter:03d}",
-            stage=2,
-            rule_id="PY-TAINT-EXFIL-001",
-            title="Sensitive data reaches a potentially dangerous sink",
-            description=(
+        is_untrusted_process_flow = (
+            "UNTRUSTED_INPUT" in source_kinds
+            and sink_name in PROCESS_SINKS
+        )
+
+        if is_untrusted_process_flow:
+            rule_id = "PY-TAINT-CMD-001"
+            title = "Untrusted input reaches process execution"
+
+            description = (
+                "Data originating from user-controlled input "
+                "reaches a process-execution function. This may "
+                "create command-injection risk."
+            )
+
+            severity = "HIGH"
+            confidence = "HIGH"
+            score = 20
+
+        elif "SENSITIVE_DATA" in source_kinds:
+            rule_id = "PY-TAINT-EXFIL-001"
+            title = "Sensitive data reaches a potentially dangerous sink"
+
+            description = (
                 f"Data originating from a sensitive source reaches "
                 f"{sink_name}. This may indicate credential exposure, "
                 f"data exfiltration, or unsafe process argument handling."
-            ),
-            severity="HIGH",
-            confidence="MEDIUM",
+            )
+
+            severity = "HIGH"
+            confidence = "MEDIUM"
+            score = 10
+
+        else:
+            rule_id = "PY-TAINT-UNTRUSTED-FLOW-001"
+            title = "Untrusted input reaches a sensitive operation"
+
+            description = (
+                f"User-controlled input reaches {sink_name}. "
+                "Review how the data is validated and used."
+            )
+
+            severity = "MEDIUM"
+            confidence = "MEDIUM"
+            score = 8
+
+        source_evidence = [
+            f"Source detected at line {line}"
+            for line in source_lines
+        ]
+
+        source_evidence.append(
+            f"Source categories: {', '.join(sorted(source_kinds))}"
+        )
+
+        source_evidence.extend([
+            f"Sink: {sink_name}()",
+            f"Tainted argument: {argument_name}",
+            f"Sink call line: {getattr(node, 'lineno', 'unknown')}",
+        ])
+
+        finding = ScanFinding(
+            finding_id=f"PY-TAINT-{self.finding_counter:03d}",
+            stage=2,
+            rule_id=rule_id,
+            title=title,
+            description=description,
+            severity=severity,
+            confidence=confidence,
             file=self.file_path,
             line=getattr(node, "lineno", None),
-            evidence=[
-                *[
-                    f"Sensitive source detected at line {line}"
-                    for line in source_lines
-                ],
-                f"Sink: {sink_name}()",
-                f"Tainted argument: {argument_name}",
-                f"Sink call line: {getattr(node, 'lineno', 'unknown')}",
-            ],
-            score_contribution=10,
+            evidence=source_evidence,
+            score_contribution=score,
         )
 
         self.findings.append(finding)
+
+    # -----------------------------------------------------
+    # ASSIGNMENT VISITORS
+    # -----------------------------------------------------
 
     def visit_Assign(self, node):
         origins = self.expression_origins(node.value)
@@ -250,7 +360,9 @@ class TaintVisitor(ast.NodeVisitor):
 
     def visit_AnnAssign(self, node):
         origins = self.expression_origins(node.value)
+
         self.assign_target(node.target, origins)
+
         self.generic_visit(node)
 
     def visit_AugAssign(self, node):
@@ -258,14 +370,20 @@ class TaintVisitor(ast.NodeVisitor):
             self.expression_origins(node.target)
             | self.expression_origins(node.value)
         )
+
         self.assign_target(node.target, origins)
+
         self.generic_visit(node)
+
+    # -----------------------------------------------------
+    # SINK ANALYSIS
+    # -----------------------------------------------------
 
     def visit_Call(self, node):
         sink_name = get_call_name(node.func)
 
         if sink_name in NETWORK_SINKS:
-            # Inspect payload-related keyword arguments.
+
             for keyword in node.keywords:
                 if keyword.arg in {
                     "data",
@@ -274,6 +392,7 @@ class TaintVisitor(ast.NodeVisitor):
                     "headers",
                     "files",
                 } or keyword.arg is None:
+
                     origins = self.expression_origins(keyword.value)
 
                     self.add_flow_finding(
@@ -283,7 +402,7 @@ class TaintVisitor(ast.NodeVisitor):
                         keyword.arg or "**kwargs",
                     )
 
-            # Inspect positional arguments after the URL argument.
+            # Inspect positional arguments after the URL.
             for index, argument in enumerate(node.args[1:], start=1):
                 origins = self.expression_origins(argument)
 
@@ -295,6 +414,7 @@ class TaintVisitor(ast.NodeVisitor):
                 )
 
         elif sink_name in PROCESS_SINKS:
+
             for index, argument in enumerate(node.args):
                 origins = self.expression_origins(argument)
 
@@ -317,12 +437,15 @@ class TaintVisitor(ast.NodeVisitor):
 
         self.generic_visit(node)
 
+    # -----------------------------------------------------
+    # FUNCTION SCOPE
+    # -----------------------------------------------------
+
     def visit_FunctionDef(self, node):
         """
-        Analyze each function with an isolated local environment.
+        Analyze functions with isolated local environments.
 
-        This avoids accidentally carrying local variable taint between
-        unrelated functions. Cross-function propagation is not implemented.
+        Cross-function propagation is not implemented.
         """
 
         for decorator in node.decorator_list:
@@ -357,13 +480,13 @@ class TaintVisitor(ast.NodeVisitor):
             self.environment = previous_environment
 
 
+# ---------------------------------------------------------
+# 4. PUBLIC ENTRY POINT
+# ---------------------------------------------------------
+
 def analyze_taint(tree: ast.AST, file_path: str) -> List[ScanFinding]:
     """
-    Public entry point for the taint analysis engine.
-
-    Arguments:
-        tree: Parsed Python AST.
-        file_path: Path of the source file being analyzed.
+    Analyze a Python AST for sensitive and untrusted data flows.
 
     Returns:
         List of ScanFinding objects.

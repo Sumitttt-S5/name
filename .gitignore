@@ -30,3 +30,13 @@ extracted/
 .idea/
 .DS_Store
 Thumbs.db
+# Generated scan and sandbox reports
+reports/*.json
+reports/*.zip
+sandbox/reports/
+
+# Local demo credentials and temporary files
+sandbox/fixtures/decoy_files/credentials.txt
+
+# Local backup files
+*.before-lint-fix

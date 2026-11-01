@@ -87,3 +87,63 @@ def execute():
 
     assert len(findings) == 1
     assert findings[0].rule_id == "PY-TAINT-EXFIL-001"
+
+def test_user_input_reaching_subprocess_is_detected():
+    code = """
+import subprocess
+
+def execute():
+    command = input("Enter command: ")
+    subprocess.run(command, shell=True)
+"""
+
+    findings = scan_code(code)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "PY-TAINT-CMD-001"
+    assert findings[0].severity == "HIGH"
+
+
+def test_constant_subprocess_command_is_not_tainted():
+    code = """
+import subprocess
+
+def execute():
+    subprocess.run("echo Hello", shell=True)
+"""
+
+    findings = scan_code(code)
+
+    assert len(findings) == 0
+
+
+def test_user_input_through_string_concatenation_is_detected():
+    code = """
+import subprocess
+
+def execute():
+    command = input("Enter command: ")
+    payload = "echo " + command
+    subprocess.run(payload, shell=True)
+"""
+
+    findings = scan_code(code)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "PY-TAINT-CMD-001"
+
+
+def test_user_input_through_f_string_is_detected():
+    code = """
+import subprocess
+
+def execute():
+    command = input("Enter command: ")
+    payload = f"echo {command}"
+    subprocess.run(payload, shell=True)
+"""
+
+    findings = scan_code(code)
+
+    assert len(findings) == 1
+    assert findings[0].rule_id == "PY-TAINT-CMD-001"
