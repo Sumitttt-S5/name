@@ -1,4 +1,4 @@
-# 🛡️ Supply Chain Guardian (SCG)
+# 🛡️ KODKAVACH
 
 ### AI-Assisted Python Package Security & Supply Chain Threat Detection Platform
 
